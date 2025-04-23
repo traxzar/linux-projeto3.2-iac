@@ -1,0 +1,107 @@
+!# /bin/bash
+
+echo "alterar hostname"
+hostnamectl set-hostname LAB-server1
+
+echo "instalando docker"
+
+apt install apt-transport-https ca-certificates curl software-properties-common -y
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /usr/share/keyrings/docker-archive-keyring.gpg
+echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/docker-archive-keyring.gpg] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" 
+tee /etc/apt/sources.list.d/docker.list > /dev/null
+sudo apt update
+sudo apt install docker-ce docker-ce-cli containerd.io -y
+
+
+echo "instalando mysql"
+apt install mysql-server-8.0 -y
+
+echo "configurando o mysql"
+sudo mysql -u root -p
+ALTER USER 'root'@'localhost' IDENTIFIED WITH mysql_native_password BY 'mysql123';
+FLUSH PRIVILEGES;
+exit;
+
+echo "criação de diretorios"
+cd /var/lib/docker/volumes
+mkdir data app
+cd /var/lib/docker/volumes/app
+mkdir _data
+cd /var/lib/docker/volumes/app/_data
+
+echo "copiando um arquivo"
+cp /home/psilva/script3/index.php /var/lib/docker/volumes/app/_data
+#Essas informações precisar ser alteradas  
+#$servername = "172.19.2.22";
+#$username = "root";
+#$password = "mysql123";
+#$database = "meubanco";
+
+echo "monstando um contener"
+docker run --name web-server -dt -p 80:80 --mount type=volume, src=app, dst=/app/ webdevops/php-apache:alpine-php7
+
+echo "matando o primeiro contener"
+docker rm --force web-server
+
+echo "Ccriando um docker swarm"
+docker swarm init 
+
+#assim que for criado o docker swarm tem aparecer uma chave onde tem que ser colado nas outras máquinas para
+# ser intergrada ao cluster "
+#OBS: tem que instalar o docker em todos os nodes
+#neste caso 
+#docker swarm join --token SWMTKN-1-4nhwlsjpbvkzanunymiyigyleqne5ar72lqm7pvu6sgnia0kew-7qqpo4mjubp1dodyohuhbul03 172.19.2.16:2377
+echo "verificar o laço dos nodes"
+docker node ls 
+
+echo "montando um serviço de contaner replicado dentro do closter"
+docker service create --name web-server --replicas 3 -dt -p 80:80 --mount type=volume,src=app,dst=/app/ webdevops/php-apache:alpine-php7
+#Comando para verificar onde foi replicado o contener 
+docker service ps web-server
+
+echo"instalando um server hfs"
+#server para  fazer a replicação dos  arquivos para os outros nodes do closter
+apt install nfs-server -t
+
+#no server 2 e server 3 tem que instalar 
+#apt install nfs-common -y
+#apt install nfs-common -y
+echo "server 1 main, precisar acessar um aquivo e incluir informações"
+nano /etc/exports
+#incluir a informação 
+/var/lib/docker/volumes/app/_data *(rw,sync,subtree_check) 
+ 
+echo "comando para exportar para as outras máquinas "
+exportfs -ar
+ 
+#comando para ver o que esta compartilhada na máquina 
+# showmount -e
+
+echo "Este comando precisar ser executada nos outros nodes do cluster exe. server2 e server3"
+#mount -o v3 172.19.2.16:/var/lib/docker/volumes/app/_data /var/lib/docker/volumes/app/_data
+
+#É necessario criar um proxy para quando tiver alteração replicar para as outras máquinas 
+
+#No server 1 criando um arquivo de conf proxy
+#criar na raiz "cd /"
+#mkdir proxy
+#cd /proxy
+#nano nginx.conf
+#incluir os ips de todos os nodes "tem na imagem"
+#dentro no diretorio proxy
+#mkdir dockerfile
+##incluir as informaçoes 
+###FROM nginx
+###COPY nginx.conf /etc/nginx/nginx.conf
+echo "criando um docker puxando as configurações do repositorio apontado"
+docker build -t proxy-app .
+echo "para ver os que o docker puxou"
+docker image ls
+echo "para rodar o docker"
+docker container run --name my-proxy-app -dti -p 4500:4500 proxy-app
+
+echo "para verificar o container que esta rodando"
+docker container ls
+
+
+
